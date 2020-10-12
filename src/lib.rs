@@ -3,7 +3,9 @@ use std::fmt::Debug;
 
 #[macro_use] extern crate nom;
 use nom::{Err, IResult};
-use nom::number::complete::be_u16;
+use nom::number::complete::{be_u8, be_u16};
+use nom::bytes::complete::take;
+use nom::multi::many_till;
 
 fn _blah() {
     todo!();
@@ -87,24 +89,31 @@ pub fn parse_dns_header(input: &[u8]) -> IResult<&[u8], DnsHeader> {
     )
 }
 
-// struct LabelPart {
-//     count: u8,
-//     bytes: Vec<u8>
-// }
+pub struct Label {
+    parts: Vec<Vec<u8>>,
+}
 
-// struct Label {
-//     parts: Vec<LabelPart>,
-// }
+pub fn parse_label_part(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
+    let (input, count) = be_u8(input)?;
+    let (input, parts) = take(count)(input)?;
+    Ok((input, parts.to_vec()))
+}
 
-// impl Debug for Label {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         for part in &self.parts {
-//             let s = String::from_utf8(part.bytes.clone()).unwrap();
-//             write!(f, "{}.", s)?
-//         }
-//         Ok(())
-//     }
-// }
+named!(empty_root, tag!([0u8]));
+
+pub fn parse_label(input: &[u8]) -> IResult<&[u8], Label> {
+    let (input, (parts, _)) = many_till(parse_label_part, empty_root)(input)?;
+    Ok((input, Label { parts }))
+}
+
+impl Debug for Label {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for part in &self.parts {
+            write!(f, "{}.", String::from_utf8_lossy(part))?
+        }
+        Ok(())
+    }
+}
 
 // #[derive(Debug)]
 // struct DnsQuestion {
@@ -152,5 +161,14 @@ mod test {
         } else {
             panic!("fail");
         }
+    }
+
+    #[test]
+    fn test_parse_label() {
+        let bytes = include_bytes!("../examples/query.google.dns");
+        let label_bytes = &bytes[12..24];
+        let (rest, label) = parse_label(label_bytes).unwrap();
+        assert!(rest.len() == 0);
+        assert_eq!(label.parts.iter().map(|s| String::from_utf8_lossy(s)).collect::<Vec<_>>(), vec!["google", "com"]);
     }
 }
