@@ -1,4 +1,4 @@
-use std::net::Ipv4Addr;
+use std::{borrow::Cow, net::Ipv4Addr};
 use std::fmt::Debug;
 
 #[macro_use] extern crate nom;
@@ -89,14 +89,14 @@ pub fn parse_dns_header(input: &[u8]) -> IResult<&[u8], DnsHeader> {
     )
 }
 
-pub struct Label {
-    parts: Vec<Vec<u8>>,
+pub struct Label<'a> {
+    parts: Vec<Cow<'a, str>>,
 }
 
-pub fn parse_label_part(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
+pub fn parse_label_part(input: &[u8]) -> IResult<&[u8], Cow<str>> {
     let (input, count) = be_u8(input)?;
     let (input, parts) = take(count)(input)?;
-    Ok((input, parts.to_vec()))
+    Ok((input, String::from_utf8_lossy(parts)))
 }
 
 named!(empty_root, tag!([0u8]));
@@ -107,18 +107,18 @@ pub fn parse_label(input: &[u8]) -> IResult<&[u8], Label> {
     Ok((input, Label { parts }))
 }
 
-impl Debug for Label {
+impl Debug for Label<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for part in &self.parts {
-            write!(f, "{}.", String::from_utf8_lossy(part))?
+            write!(f, "{}.", part)?
         }
         Ok(())
     }
 }
 
 #[derive(Debug)]
-pub struct DnsQuestion {
-    qname: Label,
+pub struct DnsQuestion<'a> {
+    qname: Label<'a>,
     qtype: u16,
 }
 
@@ -176,7 +176,7 @@ mod test {
         let label_bytes = &bytes[12..24];
         let (rest, label) = parse_label(label_bytes).unwrap();
         assert!(rest.len() == 0);
-        assert_eq!(label.parts.iter().map(|s| String::from_utf8_lossy(s)).collect::<Vec<_>>(), vec!["google", "com"]);
+        assert_eq!(label.parts, vec!["google", "com"]);
     }
 
     #[test]
@@ -186,6 +186,6 @@ mod test {
         let (rest, question) = parse_question(question_bytes).unwrap();
         assert!(rest.len() == 0);
         assert!(question.qtype == 1u16);
-        assert!(question.qname.parts.len() == 2);
+        assert!(question.qname.parts == vec!["google", "com"]);
     }
 }
