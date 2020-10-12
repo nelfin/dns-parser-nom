@@ -102,6 +102,7 @@ pub fn parse_label_part(input: &[u8]) -> IResult<&[u8], Vec<u8>> {
 named!(empty_root, tag!([0u8]));
 
 pub fn parse_label(input: &[u8]) -> IResult<&[u8], Label> {
+    // TODO: enforce letters-digits-hyphen rule for allowed characters?
     let (input, (parts, _)) = many_till(parse_label_part, empty_root)(input)?;
     Ok((input, Label { parts }))
 }
@@ -115,12 +116,18 @@ impl Debug for Label {
     }
 }
 
-// #[derive(Debug)]
-// struct DnsQuestion {
-//     qname: Label,
-//     qtype: u16,
-//     _qclass: u16,  // ignored
-// }
+#[derive(Debug)]
+pub struct DnsQuestion {
+    qname: Label,
+    qtype: u16,
+}
+
+pub fn parse_question(input: &[u8]) -> IResult<&[u8], DnsQuestion> {
+    let (input, qname) = parse_label(input)?;
+    let (input, qtype) = be_u16(input)?;
+    let (input, _qclass) = be_u16(input)?;  // expected to be 1u16
+    Ok((input, DnsQuestion { qname, qtype }))
+}
 
 // #[derive(Debug)]
 // struct DnsRecordPreamble {
@@ -170,5 +177,15 @@ mod test {
         let (rest, label) = parse_label(label_bytes).unwrap();
         assert!(rest.len() == 0);
         assert_eq!(label.parts.iter().map(|s| String::from_utf8_lossy(s)).collect::<Vec<_>>(), vec!["google", "com"]);
+    }
+
+    #[test]
+    fn test_parse_question() {
+        let bytes = include_bytes!("../examples/query.google.dns");
+        let question_bytes = &bytes[12..];
+        let (rest, question) = parse_question(question_bytes).unwrap();
+        assert!(rest.len() == 0);
+        assert!(question.qtype == 1u16);
+        assert!(question.qname.parts.len() == 2);
     }
 }
