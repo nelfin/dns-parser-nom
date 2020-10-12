@@ -1,5 +1,5 @@
 [package]
-name = "phonenumber-info"
+name = "dns_parser_nom"
 version = "0.1.0"
 authors = ["Andrew Haigh <hello@nelf.in>"]
 edition = "2018"
