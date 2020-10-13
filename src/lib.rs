@@ -3,7 +3,7 @@ use std::fmt::Debug;
 
 #[macro_use] extern crate nom;
 use nom::{Err, IResult};
-use nom::number::complete::{be_u8, be_u16};
+use nom::number::complete::{be_u8, be_u16, be_u32};
 use nom::bytes::complete::take;
 
 #[derive(Debug)]
@@ -143,14 +143,22 @@ pub fn parse_question<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult
     Ok((input, DnsQuestion { qname, qtype }))
 }
 
-// #[derive(Debug)]
-// struct DnsRecordPreamble {
-//     rname: Label,
-//     rtype: u16,
-//     _rclass: u16,  // ignored
-//     ttl: u32,
-//     length: u16,
-// }
+#[derive(Debug)]
+pub struct DnsRecordPreamble<'a> {
+    rname: Label<'a>,
+    rtype: u16,
+    ttl: u32,
+    length: u16,
+}
+
+pub fn parse_record_preamble<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&'a [u8], DnsRecordPreamble<'a>> {
+    let (input, rname) = parse_label(input, start_of_packet)?;
+    let (input, rtype) = be_u16(input)?;
+    let (input, _rclass) = be_u16(input)?;  // expected to be 1u16
+    let (input, ttl) = be_u32(input)?;
+    let (input, length) = be_u16(input)?;
+    Ok((input, DnsRecordPreamble { rname, rtype, ttl, length }))
+}
 
 // #[derive(Debug)]
 // struct DnsRecord {
@@ -212,5 +220,19 @@ mod test {
         assert!(rest.len() == 0);
         assert!(question.qtype == 1u16);
         assert!(question.qname.parts == vec!["google", "com"]);
+    }
+
+    #[test]
+    fn test_parse_simple_record() {
+        let start_of_packet = include_bytes!("../examples/response.google.dns");
+        let input = &start_of_packet[28..];
+        println!("input: {:x?}", input);
+        let res = parse_record_preamble(input, start_of_packet);
+        assert!(res.is_ok());
+        let (rest, record) = res.unwrap();
+        println!("record: {:?}", record);
+        assert!(rest.len() == 4); // IP left over
+        assert!(record.rtype == 1u16);
+        assert!(record.rname.parts == vec!["google", "com"]);  // TODO
     }
 }
