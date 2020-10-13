@@ -5,27 +5,6 @@ use std::fmt::Debug;
 use nom::{Err, IResult};
 use nom::number::complete::{be_u8, be_u16};
 use nom::bytes::complete::take;
-use nom::multi::many_till;
-
-fn _blah() {
-    todo!();
-    // FIXME: this is really gross
-    // let mut value: Vec<LabelPart> = vec![];
-    // let mut rest = rest;
-    // loop {
-    //     let (_, len) = u8::read(rest, _bit_size)?;
-    //     if (len & 0xC0) == 0xC0 {
-    //         todo!("handle jumps");
-    //     }
-    //     let parts = LabelPart::read(rest, ())?;
-    //     rest = parts.0;
-    //     if parts.1.count == 0 {
-    //         break;
-    //     }
-    //     value.push(parts.1);
-    // }
-    // Ok((rest, value))
-}
 
 #[derive(Debug)]
 pub struct DnsHeader {
@@ -93,18 +72,50 @@ pub struct Label<'a> {
     parts: Vec<Cow<'a, str>>,
 }
 
-pub fn parse_label_part(input: &[u8]) -> IResult<&[u8], Cow<str>> {
-    let (input, count) = be_u8(input)?;
-    let (input, parts) = take(count)(input)?;
-    Ok((input, String::from_utf8_lossy(parts)))
+pub enum LabelPart<'a> {
+    Root,
+    Regular(Cow<'a, str>),
+    Backreference(usize),
 }
 
-named!(empty_root, tag!([0u8]));
+pub fn parse_label_part<'a>(input: &'a [u8]) -> IResult<&[u8], LabelPart<'a>> {
+    let (_, tag_byte) = be_u8(input)?;  // peek
+    if (tag_byte & 0xC0) == 0xC0 {
+        let (input, addr) = be_u16(input)?;
+        let addr: usize = (addr & 0x03FF).into();
+        Ok((input, LabelPart::Backreference(addr)))
+    } else {
+        let (input, count) = be_u8(input)?;  // TODO: assert <= 63
+        if count == 0u8 {
+            return Ok((input, LabelPart::Root))
+        }
+        let (input, parts) = take(count)(input)?;
+        Ok((input, LabelPart::Regular(String::from_utf8_lossy(parts))))
+    }
+}
 
-pub fn parse_label(input: &[u8]) -> IResult<&[u8], Label> {
+fn parse_label_inner<'a>(input: &'a [u8], start_of_packet: &'a [u8], label: Label<'a>, jumps: usize) -> IResult<&'a [u8], Label<'a>> {
+    assert!(jumps < 5, "maximum number of indirections reached");
+    let (input, part) = parse_label_part(input)?;
+    match part {
+        LabelPart::Root => Ok((&input[..0], label)),  // XXX: lying about input bytes because we may have jumped
+        LabelPart::Regular(s) => {
+            let mut label = label;
+            label.parts.push(s);
+            parse_label_inner(input, start_of_packet, label, jumps)
+        }
+        LabelPart::Backreference(j) => {
+            // TODO: ensure jump backwards
+            assert!(j < 512, "jump is longer than 512");
+            parse_label_inner(&start_of_packet[j..], start_of_packet, label, jumps+1)
+        }
+    }
+}
+
+pub fn parse_label<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&'a [u8], Label<'a>> {
     // TODO: enforce letters-digits-hyphen rule for allowed characters?
-    let (input, (parts, _)) = many_till(parse_label_part, empty_root)(input)?;
-    Ok((input, Label { parts }))
+    let label = Label { parts: vec![] };
+    parse_label_inner(input, start_of_packet, label, 0)
 }
 
 impl Debug for Label<'_> {
@@ -122,12 +133,12 @@ pub struct DnsQuestion<'a> {
     qtype: u16,
 }
 
-pub fn parse_question(input: &[u8]) -> IResult<&[u8], DnsQuestion> {
-    let (input, qname) = parse_label(input)?;
-    let (input, qtype) = be_u16(input)?;
-    let (input, _qclass) = be_u16(input)?;  // expected to be 1u16
-    Ok((input, DnsQuestion { qname, qtype }))
-}
+// pub fn parse_question(input: &[u8]) -> IResult<&[u8], DnsQuestion> {
+//     let (input, qname) = parse_label(input)?;
+//     let (input, qtype) = be_u16(input)?;
+//     let (input, _qclass) = be_u16(input)?;  // expected to be 1u16
+//     Ok((input, DnsQuestion { qname, qtype }))
+// }
 
 // #[derive(Debug)]
 // struct DnsRecordPreamble {
@@ -172,20 +183,21 @@ mod test {
 
     #[test]
     fn test_parse_label() {
-        let bytes = include_bytes!("../examples/query.google.dns");
-        let label_bytes = &bytes[12..24];
-        let (rest, label) = parse_label(label_bytes).unwrap();
+        let start_of_packet = include_bytes!("../examples/query.google.dns");
+        let input = &start_of_packet[12..24];
+        let (rest, label) = parse_label(input, start_of_packet).unwrap();
+        println!("rest: {:02x?}", rest);
         assert!(rest.len() == 0);
         assert_eq!(label.parts, vec!["google", "com"]);
     }
 
     #[test]
-    fn test_parse_question() {
-        let bytes = include_bytes!("../examples/query.google.dns");
-        let question_bytes = &bytes[12..];
-        let (rest, question) = parse_question(question_bytes).unwrap();
+    fn test_parse_label_jump() {
+        let start_of_packet = include_bytes!("../examples/response.google.dns");
+        let input = &start_of_packet[28..30];
+        let (rest, label) = parse_label(input, start_of_packet).unwrap();
+        println!("rest: {:?}", rest);
         assert!(rest.len() == 0);
-        assert!(question.qtype == 1u16);
-        assert!(question.qname.parts == vec!["google", "com"]);
+        assert_eq!(label.parts, vec!["google", "com"]);
     }
 }
