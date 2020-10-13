@@ -136,12 +136,12 @@ pub struct DnsQuestion<'a> {
     qtype: u16,
 }
 
-// pub fn parse_question(input: &[u8]) -> IResult<&[u8], DnsQuestion> {
-//     let (input, qname) = parse_label(input)?;
-//     let (input, qtype) = be_u16(input)?;
-//     let (input, _qclass) = be_u16(input)?;  // expected to be 1u16
-//     Ok((input, DnsQuestion { qname, qtype }))
-// }
+pub fn parse_question<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&'a [u8], DnsQuestion<'a>> {
+    let (input, qname) = parse_label(input, start_of_packet)?;
+    let (input, qtype) = be_u16(input)?;
+    let (input, _qclass) = be_u16(input)?;  // expected to be 1u16
+    Ok((input, DnsQuestion { qname, qtype }))
+}
 
 // #[derive(Debug)]
 // struct DnsRecordPreamble {
@@ -202,5 +202,15 @@ mod test {
         println!("rest: {:?}", rest);
         assert!(rest.len() == 0);
         assert_eq!(label.parts, vec!["google", "com"]);
+    }
+
+    #[test]
+    fn test_parse_question() {
+        let start_of_packet = include_bytes!("../examples/query.google.dns");
+        let input = &start_of_packet[12..];
+        let (rest, question) = parse_question(input, start_of_packet).unwrap();
+        assert!(rest.len() == 0);
+        assert!(question.qtype == 1u16);
+        assert!(question.qname.parts == vec!["google", "com"]);
     }
 }
