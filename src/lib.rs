@@ -98,7 +98,7 @@ fn parse_label_inner<'a>(input: &'a [u8], start_of_packet: &'a [u8], label: Labe
     assert!(jumps < 5, "maximum number of indirections reached");
     let (input, part) = parse_label_part(input)?;
     match part {
-        LabelPart::Root => Ok((&input[..0], label)),  // XXX: lying about input bytes because we may have jumped
+        LabelPart::Root => Ok((input, label)),
         LabelPart::Regular(s) => {
             let mut label = label;
             label.parts.push(s);
@@ -107,7 +107,10 @@ fn parse_label_inner<'a>(input: &'a [u8], start_of_packet: &'a [u8], label: Labe
         LabelPart::Backreference(j) => {
             // TODO: ensure jump backwards
             assert!(j < 512, "jump is longer than 512");
-            parse_label_inner(&start_of_packet[j..], start_of_packet, label, jumps+1)
+            // We reset the input reference here to the jumped location and so discard the returned value
+            // of input, instead returning input from parse_label_part, i.e. after the u16 of the backref
+            let (_, label) = parse_label_inner(&start_of_packet[j..], start_of_packet, label, jumps+1)?;
+            Ok((input, label))
         }
     }
 }
