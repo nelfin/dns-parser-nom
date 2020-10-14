@@ -160,11 +160,18 @@ pub fn parse_record_preamble<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> 
     Ok((input, DnsRecordPreamble { rname, rtype, ttl, length }))
 }
 
-// #[derive(Debug)]
-// struct DnsRecord {
-//     preamble: DnsRecordPreamble,
-//     body: Ipv4Addr,  // TODO!
-// }
+#[derive(Debug)]
+pub struct DnsRecord<'a> {
+    preamble: DnsRecordPreamble<'a>,
+    ipv4: Ipv4Addr,  // TODO!
+}
+
+pub fn parse_record<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&'a [u8], DnsRecord<'a>> {
+    let (input, preamble) = parse_record_preamble(input, start_of_packet)?;
+    let (input, ipv4) = be_u32(input)?;
+    let ipv4 = Ipv4Addr::from(ipv4);
+    Ok((input, DnsRecord { preamble, ipv4 }))
+}
 
 // #[derive(Default, Debug)]
 // struct DnsPacket {
@@ -234,5 +241,18 @@ mod test {
         assert!(rest.len() == 4); // IP left over
         assert!(record.rtype == 1u16);
         assert!(record.rname.parts == vec!["google", "com"]);  // TODO
+    }
+
+    #[test]
+    fn test_full_A_record() {
+        let start_of_packet = include_bytes!("../examples/response.ai.");
+        let input = &start_of_packet[0x14..];
+        let res = parse_record(input, start_of_packet);
+        assert!(res.is_ok());
+        let (rest, record) = res.unwrap();
+        assert!(rest.len() == 0);
+        assert!(record.preamble.rtype == 1u16);  // FIXME, .preamble stuff
+        assert!(record.preamble.rname.parts == vec!["ai"]);
+        assert_eq!(record.ipv4, Ipv4Addr::new(209, 59, 119, 34));
     }
 }
