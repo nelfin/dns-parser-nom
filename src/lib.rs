@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use nom::{Err, IResult};
 use nom::number::complete::{be_u8, be_u16, be_u32};
 use nom::bytes::complete::take;
+use nom::multi::count;
 
 #[derive(Debug)]
 pub struct DnsHeader {
@@ -201,14 +202,31 @@ pub fn parse_record<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&
     }
 }
 
-// #[derive(Default, Debug)]
-// struct DnsPacket {
-//     header: DnsHeader,
-//     questions: Vec<DnsQuestion>,
-//     answers: Vec<DnsRecord>,
-//     authorities: Vec<DnsRecord>,
-//     resources: Vec<DnsRecord>,
-// }
+#[derive(Debug)]
+pub struct DnsPacket<'a> {
+    header: DnsHeader,
+    questions: Vec<DnsQuestion<'a>>,
+    answers: Vec<DnsRecord<'a>>,
+    authorities: Vec<DnsRecord<'a>>,
+    resources: Vec<DnsRecord<'a>>,
+}
+
+pub fn parse_packet<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&'a [u8], DnsPacket<'a>> {
+    let (input, header) = parse_dns_header(input)?;
+    // FIXME: convert these to usize on input?
+    let (input, questions) = count(|i| parse_question(i, start_of_packet), header.questions.into())(input)?;
+    let (input, answers) = count(|i| parse_record(i, start_of_packet), header.answers.into())(input)?;
+    let (input, authorities) = count(|i| parse_record(i, start_of_packet), header.authorities.into())(input)?;
+    let (input, resources) = count(|i| parse_record(i, start_of_packet), header.resources.into())(input)?;
+
+    Ok((input, DnsPacket {
+        header,
+        questions,
+        answers,
+        authorities,
+        resources,
+    }))
+}
 
 #[cfg(test)]
 mod test {
@@ -284,6 +302,40 @@ mod test {
             assert_eq!(ipv4, Ipv4Addr::new(209, 59, 119, 34));
         } else {
             assert!(false, "wrong record type");
+        }
+    }
+
+    #[test]
+    fn test_parse_full_query() {
+        let start_of_packet = include_bytes!("../examples/query.ai.");
+        let input = &start_of_packet[..];
+        let res = parse_packet(input, start_of_packet);
+        assert!(res.is_ok());
+        let (rest, packet) = res.unwrap();
+        assert!(rest.len() == 0);
+        assert_eq!(packet.header.questions, 1);
+        let q = &packet.questions[0];
+        assert_eq!(q.qname.parts, vec!["ai"]);
+    }
+
+    #[test]
+    fn test_parse_full_response() {
+        let start_of_packet = include_bytes!("../examples/response.ai.");
+        let input = &start_of_packet[..];
+        let res = parse_packet(input, start_of_packet);
+        assert!(res.is_ok());
+        let (rest, packet) = res.unwrap();
+        assert!(rest.len() == 0);
+        assert_eq!(packet.header.questions, 1);
+        let q = &packet.questions[0];
+        assert_eq!(q.qname.parts, vec!["ai"]);
+        assert_eq!(packet.header.answers, 1);
+        let a = &packet.answers[0];
+        if let DnsRecord::A { preamble, ipv4 } = a {
+            assert_eq!(preamble.rname.parts, vec!["ai"]);
+            assert_eq!(*ipv4, Ipv4Addr::new(209, 59, 119, 34));
+        } else {
+            assert!(false, "invalid parse");
         }
     }
 }
