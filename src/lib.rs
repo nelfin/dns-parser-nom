@@ -143,17 +143,38 @@ pub fn parse_question<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult
     Ok((input, DnsQuestion { qname, qtype }))
 }
 
+#[repr(u16)]
+#[derive(Debug, PartialEq)]
+pub enum RecordType {
+    UNKNOWN,
+    A = 1,
+}
+
+impl From<u16> for RecordType {
+    fn from(tag: u16) -> Self {
+        match tag {
+            1 => RecordType::A,
+            _ => RecordType::UNKNOWN,
+        }
+    }
+}
+
+fn parse_record_type(input: &[u8]) -> IResult<&[u8], RecordType> {
+    let (input, rtype_tag) = be_u16(input)?;
+    Ok((input, RecordType::from(rtype_tag)))
+}
+
 #[derive(Debug)]
 pub struct DnsRecordPreamble<'a> {
     rname: Label<'a>,
-    rtype: u16,
+    rtype: RecordType,
     ttl: u32,
     length: u16,
 }
 
 pub fn parse_record_preamble<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&'a [u8], DnsRecordPreamble<'a>> {
     let (input, rname) = parse_label(input, start_of_packet)?;
-    let (input, rtype) = be_u16(input)?;
+    let (input, rtype) = parse_record_type(input)?;
     let (input, _rclass) = be_u16(input)?;  // expected to be 1u16
     let (input, ttl) = be_u32(input)?;
     let (input, length) = be_u16(input)?;
@@ -161,16 +182,23 @@ pub fn parse_record_preamble<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> 
 }
 
 #[derive(Debug)]
-pub struct DnsRecord<'a> {
-    preamble: DnsRecordPreamble<'a>,
-    ipv4: Ipv4Addr,  // TODO!
+pub enum DnsRecord<'a> {
+    UNKNOWN { preamble: DnsRecordPreamble<'a> },
+    A       { preamble: DnsRecordPreamble<'a>, ipv4: Ipv4Addr },
 }
 
 pub fn parse_record<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&'a [u8], DnsRecord<'a>> {
     let (input, preamble) = parse_record_preamble(input, start_of_packet)?;
-    let (input, ipv4) = be_u32(input)?;
-    let ipv4 = Ipv4Addr::from(ipv4);
-    Ok((input, DnsRecord { preamble, ipv4 }))
+    match preamble.rtype {
+        RecordType::UNKNOWN => {
+            let (input, _) = take(preamble.length)(input)?;
+            Ok((input, DnsRecord::UNKNOWN { preamble }))
+        },
+        RecordType::A => {
+            let (input, ipv4) = be_u32(input)?;
+            Ok((input, DnsRecord::A { preamble, ipv4: Ipv4Addr::from(ipv4) }))
+        }
+    }
 }
 
 // #[derive(Default, Debug)]
@@ -226,7 +254,7 @@ mod test {
         let (rest, question) = parse_question(input, start_of_packet).unwrap();
         assert!(rest.len() == 0);
         assert!(question.qtype == 1u16);
-        assert!(question.qname.parts == vec!["google", "com"]);
+        assert_eq!(question.qname.parts, vec!["google", "com"]);
     }
 
     #[test]
@@ -239,7 +267,7 @@ mod test {
         let (rest, record) = res.unwrap();
         println!("record: {:?}", record);
         assert!(rest.len() == 4); // IP left over
-        assert!(record.rtype == 1u16);
+        assert!(record.rtype == RecordType::A);
         assert!(record.rname.parts == vec!["google", "com"]);  // TODO
     }
 
@@ -251,8 +279,11 @@ mod test {
         assert!(res.is_ok());
         let (rest, record) = res.unwrap();
         assert!(rest.len() == 0);
-        assert!(record.preamble.rtype == 1u16);  // FIXME, .preamble stuff
-        assert!(record.preamble.rname.parts == vec!["ai"]);
-        assert_eq!(record.ipv4, Ipv4Addr::new(209, 59, 119, 34));
+        if let DnsRecord::A { preamble, ipv4 } = record {
+            assert!(preamble.rname.parts == vec!["ai"]);
+            assert_eq!(ipv4, Ipv4Addr::new(209, 59, 119, 34));
+        } else {
+            assert!(false, "wrong record type");
+        }
     }
 }
