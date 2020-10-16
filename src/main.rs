@@ -1,33 +1,36 @@
-use std::{net::UdpSocket, default::Default};
-use std::fmt::Debug;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, UdpSocket};
 
 // parse DNS packet
 // stub resolver
 
 fn handle_query(socket: &UdpSocket) -> std::io::Result<()> {
-    // let mut data = [0u8; 512];
-    // let (n, src) = socket.recv_from(&mut data)?;
-    // let data = &data[..n];
+    let mut data = [0u8; 512];
+    let (n, src) = socket.recv_from(&mut data)?;
+    let data = &data[..n];
 
-    // println!("bytes: {:?}", data);
-    // let res = DnsPacket::from_bytes((data, 0));
-    // let request: DnsPacket = match res {
-    //     Ok((_, request)) => request,
-    //     Err(e) =>  { eprintln!("error parsing: {}", e); todo!(); }
-    // };
+    let res = dns_parser::parse_packet(data, data);
+    let request: dns_parser::DnsPacket = match res {
+        Ok((_, request)) => request,
+        Err(e) =>  { eprintln!("error parsing: {}", e); todo!(); }
+    };
 
-    // let data = include_bytes!("../examples/response.google.dns"); // FIXME
-    // let (_, mut response) = DnsPacket::from_bytes((data, 0)).unwrap();
-    // response.header.id = request.header.id;
-    // response.header.message_type = 1; // response
-    //let resp_buf = response.to_bytes().unwrap();
+    println!("{:#x?}", request);
 
-    // println!("request: {:?}", request);
-    // // println!("response: {:?}", response);
-    // let resp_buf = [0u8; 512];
+    let mut response = dns_parser::DnsPacket::new();
+    // FIXME: stop exposing this stuff publicly
+    response.header.id = request.header.id;
+    response.header.message_type = 1; // response
+    let q = &request.questions[0];
+    response.add_question(q.clone());
+    response.add_answer(dns_parser::DnsRecord::from_question(q, Ipv4Addr::new(12, 34, 56, 78)));
 
-    // socket.send_to(&resp_buf, src)?;
+    let mut resp_buf = [0u8; 512];
+    let n = response.serialise(&mut resp_buf);
+    let resp_buf = &resp_buf[..n];
+    println!("{:02x?}", resp_buf);
+
+    socket.send_to(&resp_buf, src)?;
+
     Ok(())
 }
 
