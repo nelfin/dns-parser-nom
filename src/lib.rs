@@ -9,9 +9,9 @@ use nom::multi::count;
 
 #[derive(Debug)]
 pub struct DnsHeader {
-    id: u16,
+    pub id: u16,
 
-    message_type: u8,
+    pub message_type: u8,
     opcode: u8,
     authoritative_answer: u8,
     truncated_message: u8,
@@ -22,10 +22,10 @@ pub struct DnsHeader {
     checking_disabled: u8,
     rescode: u8,
 
-    questions: u16,
-    answers: u16,
-    authorities: u16,
-    resources: u16,
+    pub questions: u16,
+    pub answers: u16,
+    pub authorities: u16,
+    pub resources: u16,
 }
 
 pub fn parse_dns_header(input: &[u8]) -> IResult<&[u8], DnsHeader> {
@@ -204,7 +204,7 @@ pub fn parse_record<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&
 
 #[derive(Debug)]
 pub struct DnsPacket<'a> {
-    header: DnsHeader,
+    pub header: DnsHeader,
     questions: Vec<DnsQuestion<'a>>,
     answers: Vec<DnsRecord<'a>>,
     authorities: Vec<DnsRecord<'a>>,
@@ -226,6 +226,43 @@ pub fn parse_packet<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&
         authorities,
         resources,
     }))
+}
+
+impl DnsPacket<'_> {
+    pub fn serialise(&self, out: &mut [u8]) -> usize {
+        let index = pack_header(out, 0, &self.header);
+        // TODO
+        index
+    }
+}
+
+fn pack_u16(out: &mut [u8], index: usize, val: u16) -> usize {
+    out[index+0] = (val >> 8) as u8;
+    out[index+1] = (val & 0xff) as u8;
+    index + 2
+}
+
+fn pack_header(out: &mut [u8], index: usize, header: &DnsHeader) -> usize {
+    let index = pack_u16(out, index, header.id);
+    // TODO: bitflags or something
+    let flags: u16 =
+        ((header.message_type as u16) << 15)            & 0b1000_0000_0000_0000u16 |
+        ((header.opcode as u16) << 11)                  & 0b0111_1000_0000_0000u16 |
+        ((header.authoritative_answer as u16) << 10)    & 0b0000_0100_0000_0000u16 |
+        ((header.truncated_message as u16) << 9)        & 0b0000_0010_0000_0000u16 |
+        ((header.recursion_desired as u16) << 8)        & 0b0000_0001_0000_0000u16 |
+        ((header.recursion_available as u16) << 7)      & 0b0000_0000_1000_0000u16 |
+        ((header.zz as u16) << 6)                       & 0b0000_0000_0100_0000u16 |
+        ((header.authed_data as u16) << 5)              & 0b0000_0000_0010_0000u16 |
+        ((header.checking_disabled as u16) << 4)        & 0b0000_0000_0001_0000u16 |
+        ((header.rescode as u16))                       & 0b0000_0000_0000_1111u16
+    ;
+    let index = pack_u16(out, index, flags);
+    let index = pack_u16(out, index, header.questions);
+    let index = pack_u16(out, index, header.answers);
+    let index = pack_u16(out, index, header.authorities);
+    let index = pack_u16(out, index, header.resources);
+    index  // should be 12 bytes in total
 }
 
 #[cfg(test)]
