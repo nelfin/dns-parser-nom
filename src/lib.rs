@@ -7,7 +7,7 @@ use nom::number::complete::{be_u8, be_u16, be_u32};
 use nom::bytes::complete::take;
 use nom::multi::count;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DnsHeader {
     pub id: u16,
 
@@ -69,6 +69,7 @@ pub fn parse_dns_header(input: &[u8]) -> IResult<&[u8], DnsHeader> {
     )
 }
 
+#[derive(Clone)]
 pub struct Label<'a> {
     parts: Vec<Cow<'a, str>>,
 }
@@ -131,7 +132,7 @@ impl Debug for Label<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DnsQuestion<'a> {
     qname: Label<'a>,
     qtype: u16,
@@ -197,6 +198,19 @@ pub enum DnsRecord<'a> {
     A       { preamble: DnsRecordPreamble<'a>, ipv4: Ipv4Addr },
 }
 
+impl<'a> DnsRecord<'a> {
+    pub fn from_question(question: &'a DnsQuestion, ipv4: Ipv4Addr) -> Self {
+        let preamble = DnsRecordPreamble {
+            rname: question.qname.clone(),
+            rtype: RecordType::A,
+            ttl: 0xff,
+            length: 4u16,
+        };
+
+        DnsRecord::A { preamble, ipv4 }
+    }
+}
+
 pub fn parse_record<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&'a [u8], DnsRecord<'a>> {
     let (input, preamble) = parse_record_preamble(input, start_of_packet)?;
     match preamble.rtype {
@@ -214,8 +228,8 @@ pub fn parse_record<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&
 #[derive(Debug)]
 pub struct DnsPacket<'a> {
     pub header: DnsHeader,
-    questions: Vec<DnsQuestion<'a>>,
-    answers: Vec<DnsRecord<'a>>,
+    pub questions: Vec<DnsQuestion<'a>>,
+    pub answers: Vec<DnsRecord<'a>>,
     authorities: Vec<DnsRecord<'a>>,
     resources: Vec<DnsRecord<'a>>,
 }
@@ -237,7 +251,29 @@ pub fn parse_packet<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&
     }))
 }
 
-impl DnsPacket<'_> {
+impl<'a> DnsPacket<'a> {
+    pub fn new() -> Self {
+        DnsPacket {
+            header: DnsHeader::default(),
+            questions: vec![],
+            answers: vec![],
+            authorities: vec![],
+            resources: vec![],
+        }
+    }
+
+    pub fn add_question(&mut self, other: DnsQuestion<'a>) -> &mut Self {
+        self.questions.push(other);
+        self.header.questions += 1;
+        self
+    }
+
+    pub fn add_answer(&mut self, other: DnsRecord<'a>) -> &mut Self {
+        self.answers.push(other);
+        self.header.answers += 1;
+        self
+    }
+
     pub fn serialise(&self, out: &mut [u8]) -> usize {
         let index = pack_header(out, 0, &self.header);
         let index = pack_questions(out, index, &self.questions);
