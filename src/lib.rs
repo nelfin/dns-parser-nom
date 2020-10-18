@@ -231,7 +231,8 @@ pub fn parse_packet<'a>(input: &'a [u8], start_of_packet: &'a [u8]) -> IResult<&
 impl DnsPacket<'_> {
     pub fn serialise(&self, out: &mut [u8]) -> usize {
         let index = pack_header(out, 0, &self.header);
-        // TODO
+        let index = pack_questions(out, index, &self.questions);
+        // let index = pack_records(out, index, &self.answers);
         index
     }
 }
@@ -263,6 +264,37 @@ fn pack_header(out: &mut [u8], index: usize, header: &DnsHeader) -> usize {
     let index = pack_u16(out, index, header.authorities);
     let index = pack_u16(out, index, header.resources);
     index  // should be 12 bytes in total
+}
+
+fn pack_label(out: &mut [u8], index: usize, label: &Label) -> usize {
+    let mut i = 0;
+    let mut v: Vec<u8> = vec![];
+    for part in &label.parts {
+        v.push(part.len() as u8);  // XXX: guards?
+        v.append(&mut part.as_bytes().to_vec());
+        i += part.len() + 1;
+    }
+    // add empty root
+    v.push(0u8);
+    i += 1;
+
+    out[index..index+i].copy_from_slice(&v);
+    index + i
+}
+
+fn pack_question(out: &mut [u8], index: usize, question: &DnsQuestion) -> usize {
+    let index = pack_label(out, index, &question.qname);
+    let index = pack_u16(out, index, question.qtype);
+    let index = pack_u16(out, index, 1u16);  // qclass
+    index
+}
+
+fn pack_questions(out: &mut [u8], index: usize, questions: &Vec<DnsQuestion>) -> usize {
+    let mut index = index;
+    for question in questions {
+        index = pack_question(out, index, &question);
+    }
+    index
 }
 
 #[cfg(test)]
