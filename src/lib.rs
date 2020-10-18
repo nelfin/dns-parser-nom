@@ -160,6 +160,15 @@ impl From<u16> for RecordType {
     }
 }
 
+impl Into<u16> for &RecordType {
+    fn into(self) -> u16 {
+        match self {
+            RecordType::A => 1,
+            _ => 0,  // TODO
+        }
+    }
+}
+
 fn parse_record_type(input: &[u8]) -> IResult<&[u8], RecordType> {
     let (input, rtype_tag) = be_u16(input)?;
     Ok((input, RecordType::from(rtype_tag)))
@@ -232,7 +241,9 @@ impl DnsPacket<'_> {
     pub fn serialise(&self, out: &mut [u8]) -> usize {
         let index = pack_header(out, 0, &self.header);
         let index = pack_questions(out, index, &self.questions);
-        // let index = pack_records(out, index, &self.answers);
+        let index = pack_records(out, index, &self.answers);
+        let index = pack_records(out, index, &self.authorities);
+        let index = pack_records(out, index, &self.resources);
         index
     }
 }
@@ -241,6 +252,20 @@ fn pack_u16(out: &mut [u8], index: usize, val: u16) -> usize {
     out[index+0] = (val >> 8) as u8;
     out[index+1] = (val & 0xff) as u8;
     index + 2
+}
+
+fn pack_u32(out: &mut [u8], index: usize, val: u32) -> usize {
+    out[index+0] = ((val & 0xff_00_00_00) >> 24) as u8;
+    out[index+1] = ((val & 0x00_ff_00_00) >> 16) as u8;
+    out[index+2] = ((val & 0x00_00_ff_00) >>  8) as u8;
+    out[index+3] = ((val & 0x00_00_00_ff)      ) as u8;
+    index + 4
+}
+
+fn pack_bytes(out: &mut [u8], index: usize, val: &[u8]) -> usize {
+    let n = val.len();
+    out[index..index+n].copy_from_slice(val);
+    index + n
 }
 
 fn pack_header(out: &mut [u8], index: usize, header: &DnsHeader) -> usize {
@@ -293,6 +318,34 @@ fn pack_questions(out: &mut [u8], index: usize, questions: &Vec<DnsQuestion>) ->
     let mut index = index;
     for question in questions {
         index = pack_question(out, index, &question);
+    }
+    index
+}
+
+fn pack_record_preamble(out: &mut [u8], index: usize, preamble: &DnsRecordPreamble) -> usize {
+    let index = pack_label(out, index, &preamble.rname);
+    let index = pack_u16(out, index, (&preamble.rtype).into());
+    let index = pack_u16(out, index, 1u16);  // rclass
+    let index = pack_u32(out, index, preamble.ttl);
+    let index = pack_u16(out, index, preamble.length);
+    index
+}
+
+fn pack_record(out: &mut [u8], index: usize, record: &DnsRecord) -> usize {
+    match record {
+        DnsRecord::A { preamble, ipv4 } => {
+            let index = pack_record_preamble(out, index, preamble);
+            let index = pack_bytes(out, index, &ipv4.octets());
+            index
+        }
+        _ => todo!()
+    }
+}
+
+fn pack_records(out: &mut [u8], index: usize, records: &Vec<DnsRecord>) -> usize {
+    let mut index = index;
+    for record in records {
+        index = pack_record(out, index, &record);
     }
     index
 }
