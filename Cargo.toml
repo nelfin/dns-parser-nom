@@ -1,8 +1,11 @@
 [package]
 name = "dns_parser_nom"
-version = "0.1.0"
+version = "0.0.0"
 authors = ["Andrew Haigh <hello@nelf.in>"]
 edition = "2018"
+license = "MIT"
+description = "An experimental library for parsing and serialising DNS messages"
+repository = "https://github.com/nelfin/dns-parser-nom"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
