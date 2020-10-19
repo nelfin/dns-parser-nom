@@ -2,7 +2,7 @@ use std::{borrow::Cow, net::Ipv4Addr};
 use std::fmt::Debug;
 
 #[macro_use] extern crate nom;
-use nom::{Err, IResult};
+use nom::IResult;
 use nom::number::complete::{be_u8, be_u16, be_u32};
 use nom::bytes::complete::take;
 use nom::multi::count;
